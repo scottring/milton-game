@@ -65,6 +65,20 @@ body {
   letter-spacing:6px;
   text-transform:lowercase;
   filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5));
+  transition: filter 0.15s;
+}
+#logo-strip.speaking span {
+  animation: logoFlash 0.25s steps(1) infinite;
+}
+@keyframes logoFlash {
+  0% {
+    filter: drop-shadow(0 0 10px rgba(255,200,100,1)) drop-shadow(0 0 25px rgba(255,150,50,0.6));
+    -webkit-text-fill-color: rgba(255,230,170,0.2);
+  }
+  50% {
+    filter: drop-shadow(0 1px 1px rgba(0,0,0,0.5));
+    -webkit-text-fill-color: transparent;
+  }
 }
 
 /* === SPEAKER GRILLE === */
@@ -169,14 +183,7 @@ body {
 .pink-2 { left:40px; top:80px; }
 .pink-3 { left:40px; top:135px; }
 
-/* Red buttons (right side of top panel, cluster) */
-.red-1 { left:200px; top:18px; }
-.red-2 { left:270px; top:18px; }
-.red-3 { left:340px; top:18px; }
-.red-4 { left:410px; top:18px; }
-.red-5 { left:235px; top:80px; }
-.red-6 { left:305px; top:80px; }
-.red-7 { left:375px; top:80px; }
+/* Red buttons (right side of top panel, circle - positioned by JS) */
 
 /* Red button labels */
 .red-label {
@@ -555,21 +562,31 @@ function preloadAudio(key) {
   audioCache[key] = a;
 }
 
+const logoStrip = document.getElementById('logo-strip');
+let speakingInterval = null;
+
+function startSpeakingFlash() {
+  logoStrip.classList.add('speaking');
+}
+function stopSpeakingFlash() {
+  logoStrip.classList.remove('speaking');
+}
+
 function playAudio(key) {
   return new Promise((resolve) => {
-    console.log('[playAudio] playing:', key);
     if (currentAudio) {
       currentAudio.pause();
       currentAudio.currentTime = 0;
       currentAudio = null;
     }
-    if (!AUDIO_SRC[key]) { console.warn('[playAudio] missing key:', key); resolve(); return; }
+    if (!AUDIO_SRC[key]) { resolve(); return; }
     const a = audioCache[key] ? audioCache[key].cloneNode() : new Audio(AUDIO_SRC[key]);
     a.volume = 1.0;
     currentAudio = a;
-    a.onended = () => { console.log('[playAudio] ended:', key); currentAudio = null; resolve(); };
-    a.onerror = (e) => { console.error('[playAudio] error:', key, e); currentAudio = null; resolve(); };
-    a.play().catch((e) => { console.error('[playAudio] play failed:', key, e); currentAudio = null; resolve(); });
+    startSpeakingFlash();
+    a.onended = () => { stopSpeakingFlash(); currentAudio = null; resolve(); };
+    a.onerror = () => { stopSpeakingFlash(); currentAudio = null; resolve(); };
+    a.play().catch(() => { stopSpeakingFlash(); currentAudio = null; resolve(); });
   });
 }
 
@@ -579,6 +596,7 @@ function stopAudio() {
     currentAudio.currentTime = 0;
     currentAudio = null;
   }
+  stopSpeakingFlash();
 }
 
 // ===== PRELOAD =====
@@ -607,19 +625,19 @@ const $ = id => document.getElementById(id);
 const statusEl = $('status');
 const playerIndicatorEl = $('player-indicator');
 
-// ===== POSITION YELLOW BUTTONS IN A CIRCLE =====
-function positionYellowButtons() {
-  const cx = 195, cy = 92, r = 68;
+// ===== POSITION BUTTONS IN CIRCLES =====
+function positionButtonsInCircle(prefix, cx, cy, r) {
   for (let i = 0; i < 7; i++) {
     const angle = (i * (360 / 7) - 90) * Math.PI / 180;
     const x = cx + r * Math.cos(angle) - 26;
     const y = cy + r * Math.sin(angle) - 26;
-    const el = $('yellow-' + (i + 1));
+    const el = $(prefix + '-' + (i + 1));
     el.style.left = x + 'px';
     el.style.top = y + 'px';
   }
 }
-positionYellowButtons();
+positionButtonsInCircle('red', 430, 92, 68);
+positionButtonsInCircle('yellow', 195, 92, 68);
 
 // ===== SHUFFLE =====
 function shuffleArray(arr) {
@@ -687,13 +705,8 @@ function enableYellowButtons() {
 }
 
 // ===== REACTION CLIPS =====
-// Wrong-match reaction sequences: [sfx, verbal] or [combined clip]
-const wrongSequences = [
-  ['sfx_fart_wrong', 'reaction_absurd'],
-  ['sfx_fart_wrong', 'reaction_no_way'],
-  ['reaction_boing_ridiculous'],
-  ['reaction_laugh_ridiculous'],
-];
+// Each clip contains SFX + verbal (boing/laugh clips are SFX-only, excluded)
+const wrongReactions = ['reaction_absurd', 'reaction_no_way'];
 
 function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
@@ -863,9 +876,8 @@ document.querySelectorAll('.btn-yellow').forEach(btn => {
       }
 
     } else {
-      // WRONG MATCH - random SFX then random verbal
-      const seq = randomFrom(wrongSequences);
-      for (const clip of seq) await playAudio(clip);
+      // WRONG MATCH - play one complete reaction clip
+      await playAudio(randomFrom(wrongReactions));
 
       clearAllLit();
 
