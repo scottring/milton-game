@@ -254,6 +254,25 @@ body {
 }
 #startup-overlay.hidden { display:none; }
 
+/* === GAME SELECT OVERLAY === */
+#game-select-overlay {
+  position:absolute;
+  top:0; left:0; width:100%; height:100%;
+  background: radial-gradient(ellipse at center, rgba(20,10,5,0.7) 0%, rgba(0,0,0,0.85) 100%);
+  border-radius: 50% / 48%;
+  display:none; flex-direction:column; align-items:center; justify-content:center;
+  z-index:45;
+  gap:16px;
+}
+#game-select-overlay.active { display:flex; }
+#game-select-overlay .msg {
+  font-family:'Press Start 2P','monospace';
+  font-size:12px;
+  color:#ffcc00;
+  margin-bottom:10px;
+  text-align:center;
+}
+
 /* === PLAYER SELECT OVERLAY === */
 #player-select-overlay {
   position:absolute;
@@ -454,6 +473,12 @@ body {
     <div id="startup-overlay">
       <div class="title">milton</div>
       <div class="tap-msg">TAP TO START</div>
+      <div style="position:absolute;bottom:4px;right:8px;font-size:9px;color:#555;">v2</div>
+    </div>
+
+    <div id="game-select-overlay">
+      <div class="msg">PICK YOUR PLAY!</div>
+      <button class="ps-btn ps-btn-1" id="gs-1">PLAY 1</button>
     </div>
 
     <div id="player-select-overlay">
@@ -532,18 +557,19 @@ function preloadAudio(key) {
 
 function playAudio(key) {
   return new Promise((resolve) => {
+    console.log('[playAudio] playing:', key);
     if (currentAudio) {
       currentAudio.pause();
       currentAudio.currentTime = 0;
       currentAudio = null;
     }
-    if (!AUDIO_SRC[key]) { resolve(); return; }
+    if (!AUDIO_SRC[key]) { console.warn('[playAudio] missing key:', key); resolve(); return; }
     const a = audioCache[key] ? audioCache[key].cloneNode() : new Audio(AUDIO_SRC[key]);
     a.volume = 1.0;
     currentAudio = a;
-    a.onended = () => { currentAudio = null; resolve(); };
-    a.onerror = () => { currentAudio = null; resolve(); };
-    a.play().catch(() => { currentAudio = null; resolve(); });
+    a.onended = () => { console.log('[playAudio] ended:', key); currentAudio = null; resolve(); };
+    a.onerror = (e) => { console.error('[playAudio] error:', key, e); currentAudio = null; resolve(); };
+    a.play().catch((e) => { console.error('[playAudio] play failed:', key, e); currentAudio = null; resolve(); });
   });
 }
 
@@ -560,11 +586,13 @@ function stopAudio() {
  'startup_how_many','startup_one_to_play','startup_two_to_play',
  'startup_hey_pick_your_play','play_one',
  'sfx_fart_wrong','sfx_horn_already_matched','sfx_win_fanfare',
- 'prompt_go','prompt_number_two_go'
+ 'prompt_go','prompt_number_two_go',
+ 'reaction_nicely_done_1','reaction_nicely_done_2',
+ 'reaction_absurd','reaction_no_way','reaction_boing_ridiculous','reaction_laugh_ridiculous'
 ].forEach(preloadAudio);
 
 // ===== GAME STATE =====
-let gameState = 'startup'; // startup | select_players | playing | win
+let gameState = 'startup'; // startup | select_game | select_players | playing | win
 let numPlayers = 1;
 let currentPlayer = 1; // 1 or 2
 let scores = [0, 0]; // index 0 = P1, index 1 = P2
@@ -659,9 +687,13 @@ function enableYellowButtons() {
 }
 
 // ===== REACTION CLIPS =====
-const positiveReactions = ['reaction_nicely_done_1','reaction_nicely_done_2','reaction_no_way'];
-const positiveReactionsP2 = ['reaction_whoopdeedoo_number_two','reaction_nicely_done_2','reaction_no_way'];
-const negativeReactions = ['reaction_absurd','reaction_boing_ridiculous','reaction_laugh_ridiculous'];
+// Wrong-match reaction sequences: [sfx, verbal] or [combined clip]
+const wrongSequences = [
+  ['sfx_fart_wrong', 'reaction_absurd'],
+  ['sfx_fart_wrong', 'reaction_no_way'],
+  ['reaction_boing_ridiculous'],
+  ['reaction_laugh_ridiculous'],
+];
 
 function randomFrom(arr) { return arr[Math.floor(Math.random() * arr.length)]; }
 
@@ -674,14 +706,33 @@ $('startup-overlay').addEventListener('click', async () => {
   await playAudio('startup_turned_me_on');
   await playAudio('startup_im_milton');
   await playAudio('startup_whos_out_there');
+  await playAudio('startup_hey_pick_your_play');
+
+  gameState = 'select_game';
+  $('game-select-overlay').classList.add('active');
+  busy = false;
+});
+
+// ===== GAME SELECTION =====
+async function selectGame(g) {
+  if (busy) return;
+  busy = true;
+  $('game-select-overlay').classList.remove('active');
+
+  await playAudio('play_one');
   await playAudio('startup_how_many');
 
   gameState = 'select_players';
   $('player-select-overlay').classList.add('active');
   busy = false;
-});
+}
+
+$('gs-1').addEventListener('click', () => selectGame(1));
 
 // ===== PLAYER SELECTION =====
+const redNames = ['stub_your','stuff_your','scramble_your','drive_your','blink_your','flush_your','drink_your'];
+const yellowNames = ['toe','turkey','eggs','car','eyes','toilet','milk'];
+
 async function selectPlayers(n) {
   if (busy) return;
   busy = true;
@@ -694,8 +745,14 @@ async function selectPlayers(n) {
     await playAudio('startup_two_to_play');
   }
 
-  await playAudio('startup_hey_pick_your_play');
-  await playAudio('play_one');
+  // Demo all 7 correct matches
+  for (let i = 1; i <= 7; i++) {
+    await playAudio('red' + i + '_' + redNames[i - 1]);
+    await playAudio('yellow' + i + '_' + yellowNames[i - 1]);
+  }
+
+  // "number one, go!"
+  await playAudio('prompt_go');
 
   startGame();
   busy = false;
@@ -748,7 +805,7 @@ document.querySelectorAll('.btn-red').forEach(btn => {
     clearAllLit();
     setButtonLit('red-' + idx);
 
-    await playAudio('red' + idx + '_' + ['stub_your','stuff_your','scramble_your','drive_your','blink_your','flush_your','drink_your'][idx-1]);
+    await playAudio('red' + idx + '_' + redNames[idx - 1]);
 
     phase = 'yellow';
     enableYellowButtons();
@@ -772,7 +829,6 @@ document.querySelectorAll('.btn-yellow').forEach(btn => {
     busy = true;
     setButtonLit('yellow-' + pos);
 
-    const yellowNames = ['toe','turkey','eggs','car','eyes','toilet','milk'];
     await playAudio('yellow' + phraseIdx + '_' + yellowNames[phraseIdx - 1]);
 
     if (phraseIdx === selectedRed) {
@@ -786,11 +842,11 @@ document.querySelectorAll('.btn-yellow').forEach(btn => {
 
       updatePlayerIndicator();
 
-      // Play positive reaction
-      if (numPlayers === 2 && currentPlayer === 2) {
-        await playAudio(randomFrom(positiveReactionsP2));
+      // Play positive reaction: "nicely done, number [1/2]"
+      if (currentPlayer === 1) {
+        await playAudio('reaction_nicely_done_1');
       } else {
-        await playAudio(randomFrom(positiveReactions));
+        await playAudio('reaction_nicely_done_2');
       }
 
       // Check win
@@ -807,9 +863,9 @@ document.querySelectorAll('.btn-yellow').forEach(btn => {
       }
 
     } else {
-      // WRONG MATCH
-      await playAudio('sfx_fart_wrong');
-      await playAudio(randomFrom(negativeReactions));
+      // WRONG MATCH - random SFX then random verbal
+      const seq = randomFrom(wrongSequences);
+      for (const clip of seq) await playAudio(clip);
 
       clearAllLit();
 
@@ -917,6 +973,7 @@ $('btn-reset').addEventListener('click', () => {
   });
   disableGameButtons();
 
+  $('game-select-overlay').classList.remove('active');
   $('player-select-overlay').classList.remove('active');
   $('score-overlay').classList.remove('active');
   $('win-overlay').classList.remove('active');
